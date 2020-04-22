@@ -7,8 +7,9 @@ indicator = 1;
 % indicator: indicate flight (indi=1) and contact (indi=-1) phases
 % x_td: x_coordinates of the point foot when it first touch the ground (to compute tangential ground force)
 % change this file into new branch
+% merge to master branch 
 
-lambda_coeff = 0.01;
+lambda_coeff = 0.02;
 eps = 0.00001;
 dt = 0.01;
 T = 1.3;
