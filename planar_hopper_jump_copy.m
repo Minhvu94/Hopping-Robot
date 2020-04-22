@@ -6,6 +6,7 @@ global control indicator x_td norminal_traj
 indicator = 1;
 % indicator: indicate flight (indi=1) and contact (indi=-1) phases
 % x_td: x_coordinates of the point foot when it first touch the ground (to compute tangential ground force)
+% trial 
 
 lambda_coeff = 0.01;
 eps = 0.00001;
