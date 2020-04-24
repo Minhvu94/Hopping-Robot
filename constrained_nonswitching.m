@@ -1,208 +1,8 @@
+%%  Regular Flow (without switching consideration): Part 1
 clear all
 clc
 load('u0_horizontal.mat','u1');
-
-global control indicator x_td norminal_traj
-indicator = 1;
-% indicator: indicate flight (indi=1) and contact (indi=-1) phases
-% x_td: x_coordinates of the point foot when it first touch the ground (to compute tangential ground force)
-
-lambda_coeff = 1e6;
-eps = 0.00001;
-dt = 0.01;
-T = 1.3;
-iter_max = ceil(T/dt);
-
-x0 = [0; 1; deg2rad(0); deg2rad(0); 1;
-      0; 0;     0;          0;      0];
-x_target = [0.5; 2; deg2rad(20); deg2rad(-20); 1;
-              0; 0;      0;            0;      0];
-        
-% u1 = [u0;zeros(2*25,1)];
-option = odeset('RelTol',1e-3);
-
-rejected = false;
-continue_iterating = true;
-
-Q1 = [];
-for ii=1:iter_max
-Q1 = blkdiag(Q1,[1 0;0 1]);
-end
-
-base = [1,1,1,1,1, 0,0,0,0,0];
-Q2 = [];
-for ii=1:10
-Q2 = blkdiag(Q2,base(:,ii));
-end
-
-switch_point_1 = 45;
-switch_point_2 = 97;
-
-switch_manifold = [0,1,0,0,0,0,0,0,0,0];
-M_bound = [0,0,0,0,-1,0,0,0,0,0; 
-           0,0,0,0,1,0,0,0,0,0];
-r_min = 0;
-r_max = 1.5;
-V_bound = [-r_min; r_max];
-% for repeat=1:3
-while continue_iterating      
-    if rejected==false
-        x_traj = [];
-        x_norm = x0;
-        M_constraint = [];
-        V_constraint = [];
-        for iter=1:iter_max
-            % This is the norminal trajectory
-            norminal_traj = true;
-            u_nominal = u1(2*iter-1:2*iter);
-            control = u_nominal;
-            [t,y] = ode45(@dynamics, [0 dt], x_norm, option);       
-            x_norminal = y(end,:)';
-            x_traj = [x_traj x_norminal];
-            
-            % Calculate partial derivative dPhi/du
-            norminal_traj = false;
-            dPhi_du = zeros(10,2);
-            for i=1:length(u_nominal)
-                control = u_nominal;
-                control(i) = u_nominal(i) + eps;
-                [t,y] = ode45(@dynamics, [0 dt], x_norm, option);
-                x_perturbed = y(end,:)';
-                dPhi_du(:,i) = (x_perturbed - x_norminal)/eps;
-            end
-            B_store{iter} = dPhi_du;
-            
-            % Calculate partial derivative dPhi/dx
-            norminal_traj = false;
-            dPhi_dx = zeros(10,10);
-            for i=1:10
-                control = u_nominal;
-                x_ = x_norm;
-                x_(i) = x_norm(i) + eps;
-                [t,y] = ode45(@dynamics, [0 dt], x_, option);
-                x_perturbed = y(end,:)';
-                dPhi_dx(:,i) = (x_perturbed - x_norminal)/eps;
-            end
-            A_store{iter} = dPhi_dx;
-            
-            x_norm = x_norminal;
-            
-            % Calculate constraint matrices
-            if switch_point_1 < iter && iter < switch_point_2
-                M = [M_bound; switch_manifold];
-                V = [V_bound - M_bound*x_norm; -switch_manifold*x_norm];
-            end
-            if iter < switch_point_1 || switch_point_2 < iter
-                M = [M_bound; -switch_manifold];
-                V = [V_bound - M_bound*x_norm; switch_manifold*x_norm];
-            end
-            if iter == switch_point_1 || iter == switch_point_2
-                M = [M_bound];
-                V = [V_bound - M_bound*x_norm];
-            end
-            M_constraint = blkdiag(M_constraint,M);
-            V_constraint = [V_constraint; V];   
-            
-        end
-        cost_old = (x_norm-x_target)'*Q2*(x_norm-x_target);
-        if cost_old <= 0.01 
-            cost_old
-            break
-        end        
-        % Calculate H
-        H = B_store{1};
-        HH = H;
-        for iter = 2:iter_max
-            H = [A_store{iter}*H, B_store{iter}];
-            HH = [HH zeros((iter-1)*10,2); H];
-        end
-        % Denote switching locations
-        indices = find(diff(sign(x_traj(2,:))));
-        
-        % Compute Aeq and Beq
-        Aeq_1 = zeros(1,10*iter_max);
-        Aeq_1(1,10*switch_point_1-8) = 1;
-        Beq_1 = -x_traj(2,switch_point_1);
-        
-        Aeq_2 = zeros(1,10*iter_max);
-        Aeq_2(1,10*switch_point_2-8) = 1;
-        Beq_2 = -x_traj(2,switch_point_2);
-
-
-         figure(1)
-         hold off 
-         scatter(x_traj(1,:),x_traj(2,:),10,'b','filled')
-         hold on 
-         scatter(x_traj(1,end),x_traj(2,end),13,'r','filled')
-         plot([-3,1,2,3],[0,0,2,0],'LineWidth',2)
-         plot(x_target(1),x_target(2),'rx','LineWidth',2)
-         grid on 
-         xlim([-5 8])
-         ylim([-1 5])
-        
-    end
-    options = optimset('display','off', 'TolFun',1e-3);
-    du = quadprog(H'*Q2*H + (lambda_coeff)*eye(2*iter_max), (x_norm-x_target)'*Q2*H, M_constraint*HH, V_constraint, [Aeq_1;Aeq_2]*HH, [Beq_1;Beq_2],[],[],[],options);
-    u_proposal = u1 + du;
-    cost_proposal = (x_norm+H*du-x_target)'*Q2*(x_norm+H*du-x_target);
-    
-    figure(2)
-    clf
-    subplot(2,1,1)
-    hold on
-    stairs(u1(1:2:end))
-    stairs(u_proposal(1:2:end))
-    
-    subplot(2,1,2)
-    hold on
-    stairs(u1(2:2:end))
-    stairs(u_proposal(2:2:end))
-    drawnow; 
-     
-    % simulate real system using proposed u
-    x_sim = x0;
-    x_traj_sim = [];
-    norminal_traj = true;
-    for ite = 1:iter_max
-        control = u_proposal(2*ite-1:2*ite);
-        [t,y] = ode45(@dynamics, [0 dt], x_sim, option);
-        x_sim = y(end,:)';
-        x_traj_sim = [x_traj_sim x_sim];
-    end
-    
-    % Lambda adaptive scheme
-    cost_proposal_actual = (x_sim-x_target)'*Q2*(x_sim-x_target);
-    if cost_proposal_actual < cost_old      
-        lambda_coeff = 0.9*lambda_coeff;
-        u1 = u_proposal;
-        rejected = false;     % accept u_proposal due to cost benefits
-    else                                    
-        lambda_coeff = 1.05*lambda_coeff;
-        rejected = true;      % reject u_proposal
-    end
-        
-%     fprintf('index: %.0f; ',indices)
-    datta = [indices(1) indices(2) x_traj(2,indices(1)) x_traj(2,indices(2)) cost_old cost_proposal cost_proposal_actual lambda_coeff norm(du)];
-    formatSpec = 'i1 = %.0f; i2= %.0f; S1 = %.4f; S2 = %.4f; old = %.3f; proposal = %.4f; actual proposal = %.4f; lambda = %.4f; norm_u  = %.4f;\n';
-    fprintf(formatSpec, datta) 
-    
-    pause()
-end
-u_step1 = u1;
-stopp = ajnvajnv
-%    u1=u_step1;
-%%      
-figure(1)
-simulation(x_traj)
-%%
-figure(2)
-hold on 
-uuu = u1(2:2:end);
-stairs(uuu)
-%%   Regular Flow: 
-clear all
-clc
-load('u0_horizontal.mat','u1');
+tic
 
 global control indicator x_td norminal_traj
 indicator = 1;
@@ -225,11 +25,6 @@ option = odeset('RelTol',1e-3);
 
 rejected = false;
 continue_iterating = true;
-
-Q1 = [];
-for ii=1:iter_max
-Q1 = blkdiag(Q1,[1 0;0 1]);
-end
 
 base = [1,1,1,1,1, 0,0,0,0,0];
 Q2 = [];
@@ -292,7 +87,7 @@ while continue_iterating
             
         end
         cost_old = (x_norm-x_target)'*Q2*(x_norm-x_target);
-        if cost_old <= 0.01 
+        if cost_old <= 0.001 
             cost_old
             break
         end        
@@ -357,18 +152,158 @@ while continue_iterating
         lambda_coeff = 1.05*lambda_coeff;
         rejected = true;      % reject u_proposal
     end
-        
-%     fprintf('index: %.0f; ',indices)
-    datta = [indices(1), indices(2), x_traj(2,indices(1)), x_traj(2,indices(2)), cost_old, cost_proposal_actual, lambda_coeff, norm(du)];
-    formatSpec = 'i1 = %.0f; i2= %.0f; S1 = %.4f; S2 = %.4f; old = %.3f; proposal = %.4f; lambda = %.4f; norm_u  = %.4f;\n';
+    
+    datta = [cost_old, cost_proposal_actual, lambda_coeff, norm(du)];
+    formatSpec = 'old = %.4f; proposal = %.4f; lambda = %.4f; norm_u  = %.4f; ';
     fprintf(formatSpec, datta) 
+    fprintf('index: %.0f; ',indices)
+    fprintf('\n')
     
 end
 u_step1 = u1;
+toc
 stopp = ajnvajnv
-%    u1=u_step1;
+%%      
+figure(1)
+simulation(x_traj)
 
-%%
+%%  Regular Flow: Part 2
+global control indicator x_td norminal_traj
+
+indicator = 1;
+mu = 50;
+eps = 0.00001;
+dt = 0.01;
+T = 1.3;
+iter_max = ceil(T/dt);
+
+x0 = [0; 1; deg2rad(0); deg2rad(0); 1;
+      0; 0;     0;          0;      0];
+x_target = [0.5; 2; deg2rad(20); deg2rad(-20); 1;
+              0; 0;      0;            0;      0];
+        
+u1 = u_step1;
+option = odeset('RelTol',1e-3);
+
+rejected = false;
+continue_iterating = true;
+
+base = [1,1,1,1,1, 0,0,0,0,0];
+Q2 = [];
+for ii=1:10
+Q2 = blkdiag(Q2,base(:,ii));
+end
+
+M_bound = [0,0,0,0,-1,0,0,0,0,0; 
+           0,0,0,0,1,0,0,0,0,0];
+r_min = 0;
+r_max = 1.5;
+V_bound = [-r_min; r_max];
+for update = 1:200
+    x_traj = [];
+    x_norm = x0;
+    M_constraint = [];
+    V_constraint = [];
+    for iter=1:iter_max
+        % This is the norminal trajectory
+        norminal_traj = true;
+        u_nominal = u1(2*iter-1:2*iter);
+        control = u_nominal;
+        [t,y] = ode45(@dynamics, [0 dt], x_norm, option);       
+        x_norminal = y(end,:)';
+        x_traj = [x_traj x_norminal];
+
+        % Calculate partial derivative dPhi/du
+        norminal_traj = false;
+        dPhi_du = zeros(10,2);
+        for i=1:length(u_nominal)
+            control = u_nominal;
+            control(i) = u_nominal(i) + eps;
+            [t,y] = ode45(@dynamics, [0 dt], x_norm, option);
+            x_perturbed = y(end,:)';
+            dPhi_du(:,i) = (x_perturbed - x_norminal)/eps;
+        end
+        B_store{iter} = dPhi_du;
+
+        % Calculate partial derivative dPhi/dx
+        norminal_traj = false;
+        dPhi_dx = zeros(10,10);
+        for i=1:10
+            control = u_nominal;
+            x_ = x_norm;
+            x_(i) = x_norm(i) + eps;
+            [t,y] = ode45(@dynamics, [0 dt], x_, option);
+            x_perturbed = y(end,:)';
+            dPhi_dx(:,i) = (x_perturbed - x_norminal)/eps;
+        end
+        A_store{iter} = dPhi_dx;
+
+        x_norm = x_norminal;
+
+        % Calculate constraint matrices
+        M = M_bound;
+        V = V_bound - M_bound*x_norm;
+        M_constraint = blkdiag(M_constraint,M);
+        V_constraint = [V_constraint; V];   
+
+    end
+    cost_old = (x_norm-x_target)'*Q2*(x_norm-x_target);
+      
+    % Calculate H
+    H = B_store{1};
+    HH = H;
+    for iter = 2:iter_max
+        H = [A_store{iter}*H, B_store{iter}];
+        HH = [HH zeros((iter-1)*10,2); H];
+    end
+    % Denote switching locations
+    indices = find(diff(sign(x_traj(2,:))));
+
+%     figure(1)
+%     hold off
+%     scatter(x_traj(1,:),x_traj(2,:),10,'b','filled')
+%     hold on
+%     scatter(x_traj(1,end),x_traj(2,end),13,'r','filled')
+%     plot([-3,1,2,3],[0,0,2,0],'LineWidth',2)
+%     plot(x_target(1),x_target(2),'rx','LineWidth',2)
+%     grid on
+%     xlim([-5 8])
+%     ylim([-1 5])
+        
+    
+    options = optimset('display','off', 'TolFun',1e-3);
+    du = quadprog( (1+mu)*eye(2*iter_max), u1, M_constraint*HH, V_constraint, Q2*H, Q2*(x_target-x_norm),[],[],[],options);
+    u_proposal = u1 + du;
+    
+    figure(2)
+    clf
+    subplot(2,1,1)
+    hold on
+    stairs(u1(1:2:end))
+    stairs(u_proposal(1:2:end))
+    
+    subplot(2,1,2)
+    hold on
+    stairs(u1(2:2:end))
+    stairs(u_proposal(2:2:end))
+    drawnow; 
+     
+    
+    datta = [cost_old, norm(u1), norm(du)];
+    formatSpec = 'old = %.4f; norm_u  = %.4f; norm_du  = %.4f; ';
+    fprintf(formatSpec, datta)
+    fprintf('index: %.0f; ',indices)
+    fprintf('\n')
+    store_norm_u(update) = norm(u1);
+    u1 = u_proposal;
+    
+end
+u_step2 = u1;
+figure
+plot(store_norm_u)
+A2 = sort(store_norm_u(:));
+out = A2(2)
+%% Initialization
 % clear all
 % clc
 % load('u_1_1_forward.mat','u1')

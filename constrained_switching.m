@@ -1,3 +1,4 @@
+%% With switching consideration: part1
 clear all
 clc
 load('u0_horizontal.mat','u1');
@@ -7,7 +8,7 @@ indicator = 1;
 % indicator: indicate flight (indi=1) and contact (indi=-1) phases
 % x_td: x_coordinates of the point foot when it first touch the ground (to compute tangential ground force)
 
-lambda_coeff = 1e6;
+lambda_coeff = 0.01;
 eps = 0.00001;
 dt = 0.01;
 T = 1.3;
@@ -15,6 +16,8 @@ iter_max = ceil(T/dt);
 
 x0 = [0; 1; deg2rad(0); deg2rad(0); 1;
       0; 0;     0;          0;      0];
+% x_target = [0.5; 1; deg2rad(20); deg2rad(-20); 1;
+%               0; 0;      0;            0;      0];
 x_target = [0.5; 2; deg2rad(20); deg2rad(-20); 1;
               0; 0;      0;            0;      0];
         
@@ -144,7 +147,6 @@ while continue_iterating
     options = optimset('display','off', 'TolFun',1e-3);
     du = quadprog(H'*Q2*H + (lambda_coeff)*eye(2*iter_max), (x_norm-x_target)'*Q2*H, M_constraint*HH, V_constraint, [Aeq_1;Aeq_2]*HH, [Beq_1;Beq_2],[],[],[],options);
     u_proposal = u1 + du;
-    cost_proposal = (x_norm+H*du-x_target)'*Q2*(x_norm+H*du-x_target);
     
     figure(2)
     clf
@@ -182,34 +184,21 @@ while continue_iterating
     end
         
 %     fprintf('index: %.0f; ',indices)
-    datta = [indices(1) indices(2) x_traj(2,indices(1)) x_traj(2,indices(2)) cost_old cost_proposal cost_proposal_actual lambda_coeff norm(du)];
-    formatSpec = 'i1 = %.0f; i2= %.0f; S1 = %.4f; S2 = %.4f; old = %.3f; proposal = %.4f; actual proposal = %.4f; lambda = %.4f; norm_u  = %.4f;\n';
-    fprintf(formatSpec, datta) 
-    
-    pause()
+    datta = [indices(1) indices(2) x_traj(2,indices(1)) x_traj(2,indices(2)) cost_old cost_proposal_actual lambda_coeff norm(du)];
+    formatSpec = 'i1 = %.0f; i2= %.0f; S1 = %.4f; S2 = %.4f; old = %.3f; proposal = %.3f; lambda = %.4f; norm_u  = %.4f;\n';
+    fprintf(formatSpec, datta)  
 end
 u_step1 = u1;
 stopp = ajnvajnv
-%    u1=u_step1;
 %%      
 figure(1)
 simulation(x_traj)
-%%
-figure(2)
-hold on 
-uuu = u1(2:2:end);
-stairs(uuu)
-%%   Regular Flow: 
-clear all
-clc
-load('u0_horizontal.mat','u1');
 
+%% Part 2: 
 global control indicator x_td norminal_traj
 indicator = 1;
-% indicator: indicate flight (indi=1) and contact (indi=-1) phases
-% x_td: x_coordinates of the point foot when it first touch the ground (to compute tangential ground force)
-
-lambda_coeff = 1e6;
+u1=u_step1;
+mu = 100;
 eps = 0.00001;
 dt = 0.01;
 T = 1.3;
@@ -217,10 +206,11 @@ iter_max = ceil(T/dt);
 
 x0 = [0; 1; deg2rad(0); deg2rad(0); 1;
       0; 0;     0;          0;      0];
+% x_target = [0.5; 1; deg2rad(20); deg2rad(-20); 1;
+%               0; 0;      0;            0;      0];
 x_target = [0.5; 2; deg2rad(20); deg2rad(-20); 1;
               0; 0;      0;            0;      0];
         
-% u1 = [u0;zeros(2*25,1)];
 option = odeset('RelTol',1e-3);
 
 rejected = false;
@@ -237,12 +227,16 @@ for ii=1:10
 Q2 = blkdiag(Q2,base(:,ii));
 end
 
+switch_point_1 = 45;
+switch_point_2 = 97;
+
+switch_manifold = [0,1,0,0,0,0,0,0,0,0];
 M_bound = [0,0,0,0,-1,0,0,0,0,0; 
            0,0,0,0,1,0,0,0,0,0];
 r_min = 0;
 r_max = 1.5;
 V_bound = [-r_min; r_max];
-while continue_iterating      
+for update = 1:200
     if rejected==false
         x_traj = [];
         x_norm = x0;
@@ -285,17 +279,24 @@ while continue_iterating
             x_norm = x_norminal;
             
             % Calculate constraint matrices
-            M = M_bound;
-            V = V_bound - M_bound*x_norm;
+            if switch_point_1 < iter && iter < switch_point_2
+                M = [M_bound; switch_manifold];
+                V = [V_bound - M_bound*x_norm; -switch_manifold*x_norm];
+            end
+            if iter < switch_point_1 || switch_point_2 < iter
+                M = [M_bound; -switch_manifold];
+                V = [V_bound - M_bound*x_norm; switch_manifold*x_norm];
+            end
+            if iter == switch_point_1 || iter == switch_point_2
+                M = [M_bound];
+                V = [V_bound - M_bound*x_norm];
+            end
             M_constraint = blkdiag(M_constraint,M);
             V_constraint = [V_constraint; V];   
             
         end
         cost_old = (x_norm-x_target)'*Q2*(x_norm-x_target);
-        if cost_old <= 0.01 
-            cost_old
-            break
-        end        
+     
         % Calculate H
         H = B_store{1};
         HH = H;
@@ -306,6 +307,15 @@ while continue_iterating
         % Denote switching locations
         indices = find(diff(sign(x_traj(2,:))));
         
+        % Compute Aeq and Beq
+        Aeq_1 = zeros(1,10*iter_max);
+        Aeq_1(1,10*switch_point_1-8) = 1;
+        Beq_1 = -x_traj(2,switch_point_1);
+        
+        Aeq_2 = zeros(1,10*iter_max);
+        Aeq_2(1,10*switch_point_2-8) = 1;
+        Beq_2 = -x_traj(2,switch_point_2);
+
         figure(1)
         hold off
         scatter(x_traj(1,:),x_traj(2,:),10,'b','filled')
@@ -315,13 +325,12 @@ while continue_iterating
         plot(x_target(1),x_target(2),'rx','LineWidth',2)
         grid on
         xlim([-5 8])
-        ylim([-1 5])
-        
+        ylim([-1 5])        
     end
+    
     options = optimset('display','off', 'TolFun',1e-3);
-    du = quadprog(H'*Q2*H + (lambda_coeff)*eye(2*iter_max), (x_norm-x_target)'*Q2*H, M_constraint*HH, V_constraint, [],[],[],[],[],options);
+    du = quadprog( (1+mu)*eye(2*iter_max), u1, M_constraint*HH, V_constraint, [Q2*H;Aeq_1*HH;Aeq_2*HH], [Q2*(x_target-x_norm);Beq_1;Beq_2],[],[],[],options);   
     u_proposal = u1 + du;
-    cost_proposal = (x_norm+H*du-x_target)'*Q2*(x_norm+H*du-x_target);
     
     figure(2)
     clf
@@ -336,43 +345,47 @@ while continue_iterating
     stairs(u_proposal(2:2:end))
     drawnow; 
      
-    % simulate real system using proposed u
-    x_sim = x0;
-    x_traj_sim = [];
-    norminal_traj = true;
-    for ite = 1:iter_max
-        control = u_proposal(2*ite-1:2*ite);
-        [t,y] = ode45(@dynamics, [0 dt], x_sim, option);
-        x_sim = y(end,:)';
-        x_traj_sim = [x_traj_sim x_sim];
-    end
-    
-    % Lambda adaptive scheme
-    cost_proposal_actual = (x_sim-x_target)'*Q2*(x_sim-x_target);
-    if cost_proposal_actual < cost_old      
-        lambda_coeff = 0.9*lambda_coeff;
-        u1 = u_proposal;
-        rejected = false;     % accept u_proposal due to cost benefits
-    else                                    
-        lambda_coeff = 1.05*lambda_coeff;
-        rejected = true;      % reject u_proposal
-    end
-        
-%     fprintf('index: %.0f; ',indices)
-    datta = [indices(1) indices(2) x_traj(2,indices(1)) x_traj(2,indices(2)) cost_old cost_proposal cost_proposal_actual lambda_coeff norm(du)];
-    formatSpec = 'i1 = %.0f; i2= %.0f; S1 = %.4f; S2 = %.4f; old = %.3f; proposal = %.4f; actual proposal = %.4f; lambda = %.4f; norm_u  = %.4f;\n';
-    fprintf(formatSpec, datta) 
-    
-    pause()
+    datta = [cost_old, norm(u1), norm(du)];
+    formatSpec = 'old = %.4f; norm_u  = %.4f; norm_du  = %.4f; ';
+    fprintf(formatSpec, datta)
+    fprintf('index: %.0f; ',indices)
+    fprintf('\n')
+    store_norm_u(1:262,update) = [u1; norm(u1); cost_old];
+    u1 = u_proposal;
 end
-u_step1 = u1;
+u_step2 = u1;
 stopp = ajnvajnv
-%    u1=u_step1;
+%% Analize data 
+load('store_norm_u.mat','store_norm_u');
+figure
+plot(store_norm_u(261,:))
+% sort data according to their steering cost (cost_old)
+[~, order] = sort(store_norm_u(262,:));
+sort_store_norm_u = store_norm_u(:,order);
+% Only consider u with steering cost smaller than 0.01
+sort_store_norm_u_2 = sort_store_norm_u(:,1:492);
+% Find u with minimum energy 
+[val,iii] = min(sort_store_norm_u_2(261,:))
+u1 = sort_store_norm_u_2(1:260,iii);
+% u1 = store_norm_u(1:260,1); % u of part 1
 
-%%
+% load('store_norm_u_consider_switching.mat','store_norm_u');
+% figure
+% plot(store_norm_u(261,:))
+% % sort data according to their steering cost (cost_old)
+% [~, order] = sort(store_norm_u(262,:));
+% sort_store_norm_u = store_norm_u(:,order);
+% % Only consider u with steering cost smaller than 0.01
+% sort_store_norm_u_2 = sort_store_norm_u(:,1:81);
+% % Find u with minimum energy 
+% [val,iii] = min(sort_store_norm_u_2(261,:))
+% u1 = sort_store_norm_u_2(1:260,iii);
+% u1 = store_norm_u(1:260,1); % u of part 1
+
+
+%% Initialization 
 % clear all
 % clc
-% load('u_1_1_forward.mat','u1')
 global control indicator x_td norminal_traj
 norminal_traj = true;
 indicator = 1; 
@@ -391,17 +404,14 @@ u1(46*2:2:96*2) = 250*ones((96-46)+1,1);       % dr>0 at 66
 u1(82*2:2:95*2) = 250*ones((95-82)+1,1);
 u1(98*2:2:119*2) = -10*ones((119-98)+1,1);
 u1(2:2:end) = u1(2:2:end)/100;
-% 
+% % 
 % u1(46*2-1:2:80*2-1) = -3*ones(35,1)/3; 
 
 % u1(100*2-1:2:120*2-1) = 10*ones(120-100+1,1);
 
 option = odeset('RelTol',1e-3);
-% lllll = 1
-save('u0_horizontal.mat','u1');
+% save('u0_horizontal.mat','u1');
 
-% u1 = [u0;0*ones(2*iter_max-length(u0),1)];   % 45,89    [46->88]=300;     
-% u1(138:2:170) = [300:1:316]';
 x_traj_1 = [];
 x_norm = x0;
 
@@ -414,7 +424,6 @@ for iter=1:iter_max
     x_traj_1 = [x_traj_1 x_norminal];
     x_norm = x_norminal;
 end
-% mmm =avkjna
 switching = find(diff(sign(x_traj_1(2,:))))
 % yy = x_traj_1(2,switching(2))
 thrust_phase = find(diff(sign(x_traj_1(10,:))))
