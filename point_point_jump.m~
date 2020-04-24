@@ -209,7 +209,7 @@ indicator = 1;
 % indicator: indicate flight (indi=1) and contact (indi=-1) phases
 % x_td: x_coordinates of the point foot when it first touch the ground (to compute tangential ground force)
 
-lambda_coeff = 1;
+lambda_coeff = 1e6;
 eps = 0.00001;
 dt = 0.01;
 T = 1.3;
@@ -321,7 +321,7 @@ while continue_iterating
     options = optimset('display','off', 'TolFun',1e-3);
     du = quadprog(H'*Q2*H + (lambda_coeff)*eye(2*iter_max), (x_norm-x_target)'*Q2*H, M_constraint*HH, V_constraint, [],[],[],[],[],options);
     u_proposal = u1 + du;
-%     cost_proposal = (x_norm+H*du-x_target)'*Q2*(x_norm+H*du-x_target);
+    cost_proposal = (x_norm+H*du-x_target)'*Q2*(x_norm+H*du-x_target);
     
     figure(2)
     clf
@@ -359,10 +359,11 @@ while continue_iterating
     end
         
 %     fprintf('index: %.0f; ',indices)
-    datta = [indices(1), indices(2), x_traj(2,indices(1)), x_traj(2,indices(2)), cost_old, cost_proposal_actual, lambda_coeff, norm(du)];
-    formatSpec = 'i1 = %.0f; i2= %.0f; S1 = %.4f; S2 = %.4f; old = %.3f; proposal = %.4f; lambda = %.4f; norm_u  = %.4f;\n';
+    datta = [indices(1) indices(2) x_traj(2,indices(1)) x_traj(2,indices(2)) cost_old cost_proposal cost_proposal_actual lambda_coeff norm(du)];
+    formatSpec = 'i1 = %.0f; i2= %.0f; S1 = %.4f; S2 = %.4f; old = %.3f; proposal = %.4f; actual proposal = %.4f; lambda = %.4f; norm_u  = %.4f;\n';
     fprintf(formatSpec, datta) 
     
+    pause()
 end
 u_step1 = u1;
 stopp = ajnvajnv
