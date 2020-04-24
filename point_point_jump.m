@@ -6,18 +6,18 @@ global control indicator x_td norminal_traj
 indicator = 1;
 % indicator: indicate flight (indi=1) and contact (indi=-1) phases
 % x_td: x_coordinates of the point foot when it first touch the ground (to compute tangential ground force)
-% continue on manifold switching branch 
 
-
-lambda_coeff = 1;
+lambda_coeff = 0.01;
 eps = 0.00001;
 dt = 0.01;
 T = 1.3;
 iter_max = ceil(T/dt);
 
-x0 = [0; 1; deg2rad(-10); deg2rad(10); 1;
-      1; 0;     0;          0;      0];
-x_target = [1.5; 2; deg2rad(0); deg2rad(10); 1;
+x0 = [0; 1; deg2rad(0); deg2rad(0); 1;
+      0; 0;     0;          0;      0];
+% x_target = [0.5; 1; deg2rad(20); deg2rad(-20); 1;
+%               0; 0;      0;            0;      0];
+x_target = [0.5; 2; deg2rad(20); deg2rad(-20); 1;
               0; 0;      0;            0;      0];
         
 % u1 = [u0;zeros(2*25,1)];
@@ -31,19 +31,21 @@ for ii=1:iter_max
 Q1 = blkdiag(Q1,[1 0;0 1]);
 end
 
-% Q2 = [0,0,1,0,0,0,0,0,0,0;
-%       0,0,0,1,0,0,0,0,0,0;
-%       0,0,0,0,0,0,0,0,0,0];
-base = [1,1,0,0,0,0,0,0,0,0];
+base = [1,1,1,1,1, 0,0,0,0,0];
 Q2 = [];
 for ii=1:10
 Q2 = blkdiag(Q2,base(:,ii));
 end
-%  rad2deg(x_traj(3:4,end))
+
+switch_point_1 = 45;
+switch_point_2 = 97;
+
 switch_manifold = [0,1,0,0,0,0,0,0,0,0];
-M_bound = -[0,0,0,0,1,0,0,0,0,0];
-r0 = 0;
-V_bound = -r0;
+M_bound = [0,0,0,0,-1,0,0,0,0,0; 
+           0,0,0,0,1,0,0,0,0,0];
+r_min = 0;
+r_max = 1.5;
+V_bound = [-r_min; r_max];
 % for repeat=1:3
 while continue_iterating      
     if rejected==false
@@ -88,33 +90,21 @@ while continue_iterating
             x_norm = x_norminal;
             
             % Calculate constraint matrices
-%             q31L=x_norm(1); q32L=x_norm(2); q41L=x_norm(3); q42L=x_norm(4); q1L=x_norm(5); xH=x_norm(6); yH=x_norm(7);
-%             foot1 = yH + L_fem*cos(q31L+q1L) + L_tib*cos(q31L+q41L+q1L);
-%             Dfoot1_dx = [-L_fem*sin(q31L+q1L)-L_tib*sin(q31L+q41L+q1L), 0, -L_tib*sin(q31L+q41L+q1L), 0, -L_fem*sin(q31L+q1L)-L_tib*sin(q31L+q41L+q1L), 0, 1,zeros(1,9)]; 
-%             foot2 =  yH + L_fem*cos(q32L+q1L) + L_tib*cos(q32L+q42L+q1L);
-%             Dfoot2_dx = [0, -L_fem*sin(q32L+q1L)-L_tib*sin(q32L+q42L+q1L), 0, -L_tib*sin(q32L+q42L+q1L), -L_fem*sin(q32L+q1L)-L_tib*sin(q32L+q42L+q1L), 0, 1,zeros(1,9)];
-%             
-%             M = [-Dfoot1_dx;-Dfoot2_dx; M_bound];
-%             V = [foot1 - ground_level; foot2 - ground_level; V_bound - M_bound*x_norm];
-%             M_constraint = blkdiag(M_constraint,M);
-%             V_constraint = [V_constraint; V];
-%             M_constraint = blkdiag(M_constraint,M_bound);
-%             V_constraint = [V_constraint; V_bound - M_bound*x_norm];
-
-%             M_constraint = blkdiag(M_constraint,M_bound);
-%             V_constraint = [V_constraint; V_bound - M_bound*x_norm];
-
-            % keep this
-            if iter == 45 || iter == 97
-                M = M_bound;
-                V = V_bound - M_bound*x_norm;
-            elseif iter < 45 || iter > 97
-                M = [M_bound;-switch_manifold*x_norm*switch_manifold];
-                V = [V_bound - M_bound*x_norm;(switch_manifold*x_norm)^2]-abs(switch_manifold*x_norm)*0;
+            if switch_point_1 < iter && iter < switch_point_2
+                M = [M_bound; switch_manifold];
+                V = [V_bound - M_bound*x_norm; -switch_manifold*x_norm];
+            end
+            if iter < switch_point_1 || switch_point_2 < iter
+                M = [M_bound; -switch_manifold];
+                V = [V_bound - M_bound*x_norm; switch_manifold*x_norm];
+            end
+            if iter == switch_point_1 || iter == switch_point_2
+                M = [M_bound];
+                V = [V_bound - M_bound*x_norm];
             end
             M_constraint = blkdiag(M_constraint,M);
-            V_constraint = [V_constraint; V];
-
+            V_constraint = [V_constraint; V];   
+            
         end
         cost_old = (x_norm-x_target)'*Q2*(x_norm-x_target);
         if cost_old <= 0.01 
@@ -133,28 +123,28 @@ while continue_iterating
         
         % Compute Aeq and Beq
         Aeq_1 = zeros(1,10*iter_max);
-        Aeq_1(1,10*45-8) = 1;
-        Beq_1 = -x_traj(2,45);
+        Aeq_1(1,10*switch_point_1-8) = 1;
+        Beq_1 = -x_traj(2,switch_point_1);
         
         Aeq_2 = zeros(1,10*iter_max);
-        Aeq_2(1,10*97-8) = 1;
-        Beq_2 = -x_traj(2,97);
+        Aeq_2(1,10*switch_point_2-8) = 1;
+        Beq_2 = -x_traj(2,switch_point_2);
 
-        figure(1)
-        hold off
-        scatter(x_traj(1,:),x_traj(2,:),10,'b','filled')
-        hold on
-        scatter(x_traj(1,end),x_traj(2,end),13,'r','filled')
-        plot([-3,1,2,3],[0,0,2,0],'LineWidth',2)
-        plot(x_target(1),x_target(2),'rx','LineWidth',2)
-        grid on
-        xlim([-5 8])
-        ylim([-1 5])
+
+         figure(1)
+         hold off 
+         scatter(x_traj(1,:),x_traj(2,:),10,'b','filled')
+         hold on 
+         scatter(x_traj(1,end),x_traj(2,end),13,'r','filled')
+         plot([-3,1,2,3],[0,0,2,0],'LineWidth',2)
+         plot(x_target(1),x_target(2),'rx','LineWidth',2)
+         grid on 
+         xlim([-5 8])
+         ylim([-1 5])
         
     end
-    
     options = optimset('display','off', 'TolFun',1e-3);
-    du = quadprog(H'*Q2*H + (lambda_coeff*cost_old^2)*eye(2*iter_max), (x_norm-x_target)'*Q2*H, M_constraint*HH, V_constraint,[Aeq_1;Aeq_2]*HH, [Beq_1;Beq_2],[],[],[],options);
+    du = quadprog(H'*Q2*H + (lambda_coeff)*eye(2*iter_max), (x_norm-x_target)'*Q2*H, M_constraint*HH, V_constraint, [Aeq_1;Aeq_2]*HH, [Beq_1;Beq_2],[],[],[],options);
     u_proposal = u1 + du;
     
     figure(2)
@@ -192,8 +182,9 @@ while continue_iterating
         rejected = true;      % reject u_proposal
     end
         
+%     fprintf('index: %.0f; ',indices)
     datta = [indices(1) indices(2) x_traj(2,indices(1)) x_traj(2,indices(2)) cost_old cost_proposal_actual lambda_coeff norm(du)];
-    formatSpec = 'i1: %.3f; i2: %.3f; S1: %.8f; S2: %.4f; cost_old: %.3f; cost_proposal: %.3f; lambda_coeff: %.4f; norm_u: %.4f;\n';
+    formatSpec = 'i1 = %.0f; i2= %.0f; S1 = %.4f; S2 = %.4f; old = %.3f; proposal = %.3f; lambda = %.4f; norm_u  = %.4f;\n';
     fprintf(formatSpec, datta)  
 end
 u_step1 = u1;
@@ -209,11 +200,11 @@ uuu = u1(2:2:end);
 stairs(uuu)
 %%
 % clear all
-clc
-% load('u_jump.mat','u1')
+% clc
+% load('u_1_1_forward.mat','u1')
 global control indicator x_td norminal_traj
 norminal_traj = true;
-indicator = 1;
+indicator = 1; 
 
 llll = 1
 
@@ -221,18 +212,20 @@ dt = 0.01;
 T = 1.3;
 iter_max = ceil(T/dt);
 
-x0 = [0; 1; deg2rad(-10); deg2rad(10); 1;
-      1; 0;     0;          0;      0];
-         
+x0 = [0; 1; deg2rad(0); deg2rad(0); 1;
+      0; 0;     0;          0;      0];
+
 u1 = 0*ones(2*iter_max,1);              % 45,100
 u1(46*2:2:96*2) = 250*ones((96-46)+1,1);       % dr>0 at 66
-u1(82*2:2:95*2) = 300*ones((95-82)+1,1);
-u1(98*2:2:109*2) = -30*ones((109-98)+1,1);
-u1(2:2:end) = u1(2:2:end)/20;
+u1(82*2:2:95*2) = 250*ones((95-82)+1,1);
+u1(98*2:2:119*2) = -10*ones((119-98)+1,1);
+u1(2:2:end) = u1(2:2:end)/100;
+% 
+% u1(46*2-1:2:80*2-1) = -3*ones(35,1)/3; 
 
-u1(46*2-1:2:80*2-1) = -15*ones(35,1); 
+% u1(100*2-1:2:120*2-1) = 10*ones(120-100+1,1);
 
-option = odeset('RelTol',1e-5);
+option = odeset('RelTol',1e-3);
 % lllll = 1
 save('u0_horizontal.mat','u1');
 
@@ -258,41 +251,6 @@ thrust_phase = find(diff(sign(x_traj_1(10,:))))
 
 figure(1)
 simulation(x_traj_1)
-%     figure
-%     subplot(2,1,1)
-%     hold on
-%     stairs(u1(1:2:end))
-%     stairs(u_step1(1:2:end))
-%     grid on
-%     
-%     subplot(2,1,2)
-%     hold on
-%     stairs(u1(2:2:end))
-%     stairs(u_step1(2:2:end)/20)
-%     grid on
-   
-    
-% figure(1)
-% grid on 
-% hold off
-% plot(x_traj_1(2,:),'k','LineWidth',1.5);
-% hold on
-% plot(x_traj_1(5,:),'b','LineWidth',1.5);
-% % plot(x_traj_1(7,:),'r','LineWidth',1.5);
-% plot(x_traj_1(10,:),'g','LineWidth',1.5);
-% legend('y','r','dr')
-
-
-% figure(3)
-% simulation(x_traj_1(:,[thrust_phase:thrust_phase+1]))
-
-% grid on 
-% figure(3)
-% plot(store_Fy)
-% plot(u1(1:2:end))
-% plot(u1(2:2:end))
-% grid on 
-% x_traj_0 =x_traj_1;
 
 function simulation(x_traj)
 g = 9.81;
@@ -319,9 +277,9 @@ for i = 1:column
     plot(p_hip(1),p_hip(2),'bo','MarkerSize',5,'LineWidth',2)
     plot(p_body(1),p_body(2),'ro','MarkerSize',5,'LineWidth',2)    
         % draw obstacles
-    plot([-3,3],[0,0],'LineWidth',2)
+    plot([-2,1,2,3],[0,0,2,0],'LineWidth',2)
     
-    xlim([-5 8])
+    xlim([-4 6])
     ylim([-1 5])
     axis equal 
     grid on
@@ -331,7 +289,8 @@ end
 
 function dxdt = dynamics(t,X)
 global control indicator x_td norminal_traj
-scale = 20;
+scale_1 = 1;
+scale_2 = 100;
 g = 9.81;
 m = 10;
 J = 10;
@@ -387,11 +346,11 @@ W = [-ml*R       0     (Jl-ml*R*l1)*cos(theta)         0               0;
         0      -m*R    (Jl+m*R*r)*sin(theta)     m*R*l2*sin(phi)  -m*R*cos(theta);
         0        0      Jl*l2*cos(theta-phi)          -J*R              0];
     
-V = [cos(theta)*(l1*Fy*sin(theta)-l1*Fx*cos(theta)-control(1)) - R*(Fx-scale*control(2)*sin(theta)-ml*l1*dtheta^2*sin(theta));
-     sin(theta)*(l1*Fy*sin(theta)-l1*Fx*cos(theta)-control(1)) + R*(ml*l1*dtheta^2*cos(theta)+Fy-scale*control(2)*cos(theta)-ml*g);
-     cos(theta)*(l1*Fy*sin(theta)-l1*Fx*cos(theta)-control(1)) + R*scale*control(2)*sin(theta) + m*R*(r*dtheta^2*sin(theta) + l2*dphi^2*sin(phi) - 2*dr*dtheta*cos(theta));
-     sin(theta)*(l1*Fy*sin(theta)-l1*Fx*cos(theta)-control(1)) - R*(scale*control(2)*cos(theta)-m*g) - m*R*(2*dr*dtheta*sin(theta) + r*dtheta^2*cos(theta) + l2*dphi^2*cos(phi));
-     l2*cos(theta-phi)*(l1*Fy*sin(theta)-l1*Fx*cos(theta)-control(1)) - R*(l2*scale*control(2)*sin(phi-theta)+control(1))];    
+V = [cos(theta)*(l1*Fy*sin(theta)-l1*Fx*cos(theta)-scale_1*control(1)) - R*(Fx-scale_2*control(2)*sin(theta)-ml*l1*dtheta^2*sin(theta));
+     sin(theta)*(l1*Fy*sin(theta)-l1*Fx*cos(theta)-scale_1*control(1)) + R*(ml*l1*dtheta^2*cos(theta)+Fy-scale_2*control(2)*cos(theta)-ml*g);
+     cos(theta)*(l1*Fy*sin(theta)-l1*Fx*cos(theta)-scale_1*control(1)) + R*scale_2*control(2)*sin(theta) + m*R*(r*dtheta^2*sin(theta) + l2*dphi^2*sin(phi) - 2*dr*dtheta*cos(theta));
+     sin(theta)*(l1*Fy*sin(theta)-l1*Fx*cos(theta)-scale_1*control(1)) - R*(scale_2*control(2)*cos(theta)-m*g) - m*R*(2*dr*dtheta*sin(theta) + r*dtheta^2*cos(theta) + l2*dphi^2*cos(phi));
+     l2*cos(theta-phi)*(l1*Fy*sin(theta)-l1*Fx*cos(theta)-scale_1*control(1)) - R*(l2*scale_2*control(2)*sin(phi-theta)+scale_1*control(1))];    
 
  dxdt = [X(6:10);
         inv(W)*V];
@@ -408,47 +367,4 @@ V = [cos(theta)*(l1*Fy*sin(theta)-l1*Fx*cos(theta)-control(1)) - R*(Fx-scale*con
 % fprintf(formatSpec, datta)
 
 end
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 

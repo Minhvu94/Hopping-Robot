@@ -1,7 +1,7 @@
 clear all
 clc
 load('u0_horizontal.mat','u1');
-%%
+
 global control indicator x_td norminal_traj
 indicator = 1;
 % indicator: indicate flight (indi=1) and contact (indi=-1) phases
@@ -9,15 +9,15 @@ indicator = 1;
 % continue on manifold switching branch 
 
 
-lambda_coeff = 0.01;
+lambda_coeff = 0.1;
 eps = 0.00001;
-dt = 0.01;
-T = 1.3;
+dt = 0.02;
+T = 2.5;
 iter_max = ceil(T/dt);
 
-x0 = [0; 1; deg2rad(-10); deg2rad(10); 1;
-      1; 0;     0;          0;      0];
-x_target = [1.5; 2; deg2rad(-10); deg2rad(10); 1;
+x0 = [-1; 1; deg2rad(-10); deg2rad(5); 1;
+      1; 0;     0;          0;      0];    
+x_target = [4; 2; deg2rad(-10); deg2rad(10); 1;
               0; 0;      0;            0;      0];
         
 % u1 = [u0;zeros(2*25,1)];
@@ -31,20 +31,17 @@ for ii=1:iter_max
 Q1 = blkdiag(Q1,[1 0;0 1]);
 end
 
-% Q2 = [0,0,1,0,0,0,0,0,0,0;
-%       0,0,0,1,0,0,0,0,0,0;
-%       0,0,0,0,0,0,0,0,0,0];
-base = [1,1,1,0,1,0,0,0,0,0];
+base = [1,1,0,0,0,0,0,0,0,0];
 Q2 = [];
 for ii=1:10
 Q2 = blkdiag(Q2,base(:,ii));
 end
-%  rad2deg(x_traj(3:4,end))
+
 switch_manifold = [0,1,0,0,0,0,0,0,0,0];
 M_bound = -[0,0,0,0,1,0,0,0,0,0];
 r0 = 0;
 V_bound = -r0;
-% for repeat=1:3
+
 while continue_iterating      
     if rejected==false
         x_traj = [];
@@ -87,37 +84,24 @@ while continue_iterating
             
             x_norm = x_norminal;
             
-            % Calculate constraint matrices
-%             q31L=x_norm(1); q32L=x_norm(2); q41L=x_norm(3); q42L=x_norm(4); q1L=x_norm(5); xH=x_norm(6); yH=x_norm(7);
-%             foot1 = yH + L_fem*cos(q31L+q1L) + L_tib*cos(q31L+q41L+q1L);
-%             Dfoot1_dx = [-L_fem*sin(q31L+q1L)-L_tib*sin(q31L+q41L+q1L), 0, -L_tib*sin(q31L+q41L+q1L), 0, -L_fem*sin(q31L+q1L)-L_tib*sin(q31L+q41L+q1L), 0, 1,zeros(1,9)]; 
-%             foot2 =  yH + L_fem*cos(q32L+q1L) + L_tib*cos(q32L+q42L+q1L);
-%             Dfoot2_dx = [0, -L_fem*sin(q32L+q1L)-L_tib*sin(q32L+q42L+q1L), 0, -L_tib*sin(q32L+q42L+q1L), -L_fem*sin(q32L+q1L)-L_tib*sin(q32L+q42L+q1L), 0, 1,zeros(1,9)];
-%             
-%             M = [-Dfoot1_dx;-Dfoot2_dx; M_bound];
-%             V = [foot1 - ground_level; foot2 - ground_level; V_bound - M_bound*x_norm];
-%             M_constraint = blkdiag(M_constraint,M);
-%             V_constraint = [V_constraint; V];
-%             M_constraint = blkdiag(M_constraint,M_bound);
-%             V_constraint = [V_constraint; V_bound - M_bound*x_norm];
-
-%             M_constraint = blkdiag(M_constraint,M_bound);
-%             V_constraint = [V_constraint; V_bound - M_bound*x_norm];
-
-            % keep this
-            if iter == 45 || iter == 97
-                M = M_bound;
-                V = V_bound - M_bound*x_norm;
-            elseif iter < 45 || 97 < iter
+            % Compute M_constraint and V_constraint
+            if iter < 23 
                 M = [M_bound; -switch_manifold];
                 V = [V_bound - M_bound*x_norm; switch_manifold*x_norm];
-            elseif 45 < iter && iter < 97
+            elseif 23 < iter && iter < 56
                 M = [M_bound; switch_manifold];
                 V = [V_bound - M_bound*x_norm; -switch_manifold*x_norm];
+            elseif iter > 56
+%                 [Mi_obs, Vi_obs] = build_Mi_obs(x_norm); % obstacles constraints 
+                M = [M_bound; -switch_manifold];
+                V = [V_bound - M_bound*x_norm; switch_manifold*x_norm];
+            elseif iter == 23 || iter == 56
+                M = [M_bound];
+                V = [V_bound - M_bound*x_norm];
             end
             M_constraint = blkdiag(M_constraint,M);
-            V_constraint = [V_constraint; V];
-
+            V_constraint = [V_constraint; V];        
+            
         end
         cost_old = (x_norm-x_target)'*Q2*(x_norm-x_target);
         if cost_old <= 0.01 
@@ -132,23 +116,23 @@ while continue_iterating
             HH = [HH zeros((iter-1)*10,2); H];
         end
         % Denote switching locations
-        indices = find(diff(sign(x_traj(2,:))));
+        indices = find(diff(sign(x_traj(2,:))))+1;
         
         % Compute Aeq and Beq
         Aeq_1 = zeros(1,10*iter_max);
-        Aeq_1(1,10*45-8) = 1;
-        Beq_1 = -x_traj(2,45);
+        Aeq_1(1,10*23-8) = 1;
+        Beq_1 = -x_traj(2,23);
         
         Aeq_2 = zeros(1,10*iter_max);
-        Aeq_2(1,10*97-8) = 1;
-        Beq_2 = -x_traj(2,97);
+        Aeq_2(1,10*56-8) = 1;
+        Beq_2 = -x_traj(2,56);
 
         figure(1)
         hold off
         scatter(x_traj(1,:),x_traj(2,:),10,'b','filled')
         hold on
         scatter(x_traj(1,end),x_traj(2,end),13,'r','filled')
-        plot([-3,1,2,3],[0,0,2,0],'LineWidth',2)
+        plot([-3,1,2,3,6],[0,0,2,0,0],'LineWidth',2)
         plot(x_target(1),x_target(2),'rx','LineWidth',2)
         grid on
         xlim([-5 8])
@@ -191,7 +175,7 @@ while continue_iterating
         u1 = u_proposal;
         rejected = false;     % accept u_proposal due to cost benefits
     else                                    
-        lambda_coeff = 1.05*lambda_coeff;
+        lambda_coeff = 1.15*lambda_coeff;
         rejected = true;      % reject u_proposal
     end
         
@@ -220,20 +204,22 @@ indicator = 1;
 
 llll = 1
 
-dt = 0.01;
-T = 1.3;
+dt = 0.02;
+T = 2.5;
 iter_max = ceil(T/dt);
 
-x0 = [0; 1; deg2rad(-10); deg2rad(10); 1;
+x0 = [-1; 1; deg2rad(-10); deg2rad(5); 1;
       1; 0;     0;          0;      0];
          
 u1 = 0*ones(2*iter_max,1);              % 45,100
-u1(46*2:2:96*2) = 250*ones((96-46)+1,1);       % dr>0 at 66
-u1(82*2:2:95*2) = 300*ones((95-82)+1,1);
-u1(98*2:2:109*2) = -30*ones((109-98)+1,1);
-u1(2:2:end) = u1(2:2:end)/20;
+u1(24*2:2:55*2) = 13*ones((55-24)+1,1);       % dr>0 at 66
+u1(37*2:2:53*2) = 14.5*ones((53-37)+1,1);
+u1(57*2:2:70*2) = -1.1*ones((70-57)+1,1);
+u1(2:2:end) = u1(2:2:end);
 
-u1(46*2-1:2:80*2-1) = -15*ones(35,1); 
+u1(23*2-1:2:40*2-1) = -8*ones((40-23)+1,1); 
+% u1(1*2-1:2:17*2-1) = -1*ones((17-1)+1,1); 
+
 
 option = odeset('RelTol',1e-5);
 % lllll = 1
@@ -322,7 +308,7 @@ for i = 1:column
     plot(p_hip(1),p_hip(2),'bo','MarkerSize',5,'LineWidth',2)
     plot(p_body(1),p_body(2),'ro','MarkerSize',5,'LineWidth',2)    
         % draw obstacles
-    plot([-3,3],[0,0],'LineWidth',2)
+    plot([-3,1,2,3,6],[0,0,2,0,0],'LineWidth',2)
     
     xlim([-5 8])
     ylim([-1 5])
@@ -410,6 +396,31 @@ V = [cos(theta)*(l1*Fy*sin(theta)-l1*Fx*cos(theta)-control(1)) - R*(Fx-scale*con
 % formatSpec = 'Fx = %.4f; Fy = %.4f; u1=%.4f; u2=%.4f; x=%.4f; dx=%.4f; ddx=%.4f; r=%.4f; dr=%.4f; ddr=%.4f;\n';
 % fprintf(formatSpec, datta)
 
+end
+
+function [Mi,Vi] = build_Mi_obs(Xi)
+% Xi: current state of the system
+% Mi: corresponding constrained matrix 
+% Vi: corresponding constrained value 
+
+half_plane_boundary = 0.1;
+if Xi(2)<2
+    if 1<Xi(1) && Xi(1)<2 
+        % n'x+b=0 : hyperplane with outward normal vector
+        n = [-2;1]; b = 2;  
+        Mi = [-n', zeros(1,8)];       
+        Vi = n'*Xi(1:2)+b;
+    elseif 2<=Xi(1) && Xi(1)<3 
+        % n'x+b=0 : hyperplane with outward normal vector
+        n = [2;1]; b = -6;   
+        Mi = [-n', zeros(1,8)];       
+        Vi = n'*Xi(1:2)+b;
+    else
+        Mi = zeros(1,10); Vi = 0;
+    end
+else
+    Mi = zeros(1,10); Vi = 0;
+end
 end
 
 
