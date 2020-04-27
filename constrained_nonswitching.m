@@ -11,13 +11,13 @@ indicator = 1;
 
 lambda_coeff = 1;
 eps = 0.00001;
-dt = 0.01;
-T = 1.3;
+dt = 0.02;
+T = 2.3;
 iter_max = ceil(T/dt);
 
 x0 = [0; 1; deg2rad(0); deg2rad(0); 1;
       0; 0;     0;          0;      0];
-x_target = [0.5; 2; deg2rad(20); deg2rad(-20); 1;
+x_target = [3; 1; deg2rad(30); deg2rad(-30); 1;
               0; 0;      0;            0;      0];
         
 % u1 = [u0;zeros(2*25,1)];
@@ -26,7 +26,7 @@ option = odeset('RelTol',1e-3);
 rejected = false;
 continue_iterating = true;
 
-base = [1,1,1,1,1, 0,0,0,0,0];
+base = [1,1,0,0,0, 0,0,0,0,0];
 Q2 = [];
 for ii=1:10
 Q2 = blkdiag(Q2,base(:,ii));
@@ -80,14 +80,15 @@ while continue_iterating
             x_norm = x_norminal;
             
             % Calculate constraint matrices
-            M = M_bound;
-            V = V_bound - M_bound*x_norm;
+%             [Mi_obs, Vi_obs] = build_Mi_obs(x_norm); % obstacles constraints 
+            M = [M_bound];
+            V = [V_bound - M_bound*x_norm];
             M_constraint = blkdiag(M_constraint,M);
             V_constraint = [V_constraint; V];   
             
         end
         cost_old = (x_norm-x_target)'*Q2*(x_norm-x_target);
-        if cost_old <= 0.001 
+        if cost_old <= 0.01 
             cost_old
             break
         end        
@@ -106,7 +107,7 @@ while continue_iterating
         scatter(x_traj(1,:),x_traj(2,:),10,'b','filled')
         hold on
         scatter(x_traj(1,end),x_traj(2,end),13,'r','filled')
-        plot([-3,1,2,3],[0,0,2,0],'LineWidth',2)
+        plot([-2,0.5,1.5,2.5,4.5],[0,0,2,0,0],'LineWidth',2)
         plot(x_target(1),x_target(2),'rx','LineWidth',2)
         grid on
         xlim([-5 8])
@@ -149,7 +150,7 @@ while continue_iterating
         u1 = u_proposal;
         rejected = false;     % accept u_proposal due to cost benefits
     else                                    
-        lambda_coeff = 1.05*lambda_coeff;
+        lambda_coeff = 1.15*lambda_coeff;
         rejected = true;      % reject u_proposal
     end
     
@@ -313,20 +314,20 @@ indicator = 1;
 
 llll = 1
 
-dt = 0.01;
-T = 1.3;
+dt = 0.02;
+T = 2.3;
 iter_max = ceil(T/dt);
 
 x0 = [0; 1; deg2rad(0); deg2rad(0); 1;
       0; 0;     0;          0;      0];
 
 u1 = 0*ones(2*iter_max,1);              % 45,100
-u1(46*2:2:96*2) = 250*ones((96-46)+1,1);       % dr>0 at 66
-u1(82*2:2:95*2) = 250*ones((95-82)+1,1);
-u1(98*2:2:119*2) = -10*ones((119-98)+1,1);
+u1(23*2:2:48*2) = 250*ones((48-23)+1,1);       % dr>0 at 66
+u1(39*2:2:47*2) = 500*ones((47-39)+1,1);
+u1(50*2:2:60*2) = -80*ones((60-50)+1,1);
 u1(2:2:end) = u1(2:2:end)/100;
 % 
-% u1(46*2-1:2:80*2-1) = -3*ones(35,1)/3; 
+% u1(23*2-1:2:40*2-1) = -20*ones(40-23+1,1); 
 
 % u1(100*2-1:2:120*2-1) = 10*ones(120-100+1,1);
 
@@ -361,7 +362,7 @@ function simulation(x_traj)
 g = 9.81;
 m = 10;
 J = 10;
-ml = 1;
+ml = 5;
 Jl = 1;
 l1 = 0.5;
 l2 = 0.4;
@@ -382,7 +383,7 @@ for i = 1:column
     plot(p_hip(1),p_hip(2),'bo','MarkerSize',5,'LineWidth',2)
     plot(p_body(1),p_body(2),'ro','MarkerSize',5,'LineWidth',2)    
         % draw obstacles
-    plot([-2,1,2,3],[0,0,2,0],'LineWidth',2)
+    plot([-2,0.5,1.5,2.5,4.5],[0,0,2,0,0],'LineWidth',2)
     
     xlim([-4 6])
     ylim([-1 5])
@@ -394,12 +395,12 @@ end
 
 function dxdt = dynamics(t,X)
 global control indicator x_td norminal_traj
-scale_1 = 1;
+scale_1 = 0.1;
 scale_2 = 100;
 g = 9.81;
 m = 10;
 J = 10;
-ml = 1;
+ml = 3;
 Jl = 1;
 l1 = 0.5;
 l2 = 0.4;
@@ -471,5 +472,30 @@ V = [cos(theta)*(l1*Fy*sin(theta)-l1*Fx*cos(theta)-scale_1*control(1)) - R*(Fx-s
 % formatSpec = 'Fx = %.4f; Fy = %.4f; u1=%.4f; u2=%.4f; x=%.4f; dx=%.4f; ddx=%.4f; r=%.4f; dr=%.4f; ddr=%.4f;\n';
 % fprintf(formatSpec, datta)
 
+end
+
+function [Mi,Vi] = build_Mi_obs(Xi)
+% Xi: current state of the system
+% Mi: corresponding constrained matrix 
+% Vi: corresponding constrained value 
+
+half_plane_boundary = 0.1;
+if Xi(2)<2
+    if 1<Xi(1) && Xi(1)<2 
+        % n'x+b=0 : hyperplane with outward normal vector
+        n = [-2;1]; b = 2;  
+        Mi = [-n', zeros(1,8)];       
+        Vi = n'*Xi(1:2)+b;
+    elseif 2<=Xi(1) && Xi(1)<3 
+        % n'x+b=0 : hyperplane with outward normal vector
+        n = [2;1]; b = -6;   
+        Mi = [-n', zeros(1,8)];       
+        Vi = n'*Xi(1:2)+b;
+    else
+        Mi = zeros(1,10); Vi = 0;
+    end
+else
+    Mi = zeros(1,10); Vi = 0;
+end
 end
 

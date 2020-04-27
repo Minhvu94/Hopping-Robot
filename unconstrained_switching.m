@@ -2,7 +2,7 @@
 clear all
 clc
 load('u0_horizontal.mat','u1');
-
+tic
 global control indicator x_td norminal_traj
 indicator = 1;
 % indicator: indicate flight (indi=1) and contact (indi=-1) phases
@@ -188,6 +188,7 @@ while continue_iterating
     formatSpec = 'i1 = %.0f; i2= %.0f; S1 = %.4f; S2 = %.4f; old = %.3f; proposal = %.3f; lambda = %.4f; norm_u  = %.4f;\n';
     fprintf(formatSpec, datta)  
 end
+toc
 u_step1 = u1;
 stopp = ajnvajnv
 %%      
@@ -410,7 +411,7 @@ u1(2:2:end) = u1(2:2:end)/100;
 % u1(100*2-1:2:120*2-1) = 10*ones(120-100+1,1);
 
 option = odeset('RelTol',1e-3);
-% save('u0_horizontal.mat','u1');
+save('u0_horizontal.mat','u1');
 
 x_traj_1 = [];
 x_norm = x0;

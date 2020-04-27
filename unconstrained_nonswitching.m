@@ -9,7 +9,7 @@ indicator = 1;
 % indicator: indicate flight (indi=1) and contact (indi=-1) phases
 % x_td: x_coordinates of the point foot when it first touch the ground (to compute tangential ground force)
 
-lambda_coeff = 1;
+lambda_coeff = 0.1;
 eps = 0.00001;
 dt = 0.01;
 T = 1.3;
@@ -87,7 +87,7 @@ while continue_iterating
             
         end
         cost_old = (x_norm-x_target)'*Q2*(x_norm-x_target);
-        if cost_old <= 0.001 
+        if cost_old <= 0.01 
             cost_old
             break
         end        
